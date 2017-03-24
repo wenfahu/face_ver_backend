@@ -8,7 +8,6 @@ from scipy import misc
 import pdb
 import time
 import zmq
-import json
 import dlib
 from matplotlib import pyplot as plt
 import align.detect_face
@@ -25,16 +24,16 @@ def prewhiten(x):
     y = np.multiply(np.subtract(x, mean), 1/std_adj)
     return y
 
-def load_image(image_paths, image_size, _prewhiten=True):
+def preprocess_image(imgs, image_size, _prewhiten=True):
     minsize = 20 # minimum size of face
     threshold = [ 0.6, 0.7, 0.7 ]  # three steps's threshold
     factor = 0.709 # scale factor
     margin = 45
 
-    nrof_samples = len(image_paths)
+    nrof_samples = len(imgs)
     images = np.zeros((nrof_samples, image_size, image_size, 3))
     for i in xrange(nrof_samples):
-        img = misc.imread(image_paths[i])
+        img = imgs[i][..., ::-1]
         img_size = np.asarray(img.shape)[0:2]
         bboxes = detector(img, 1)
         bbox = bboxes[0]
@@ -93,11 +92,17 @@ socket.bind("tcp://*:5555")
 print('sever listening')
 verification_threshold = 0.4
 while True:
-    message = socket.recv()
-    print("Received request: %s" % message)
-    obj = json.loads(message)
-    img_paths = [ obj['cam'], obj['id'] ]
-    imgs = load_image(img_paths, 160)
+    msg = socket.recv()
+    len1, row1, col1, len2, row2, col2 = np.fromstring(msg[:24], dtype=np.int32)
+    print(np.fromstring(msg[:24], dtype=np.int32))
+    img1 = np.fromstring(msg[24: 24 + len1], dtype=np.uint8)
+    print (img1.shape)
+    img1 = img1.reshape(row1, col1, -1)
+    img2 = np.fromstring(msg[24 + len1:], dtype=np.uint8)
+    print (img2.shape)
+    img2 = img2.reshape(row2, col2, -1)
+
+    imgs = preprocess_image([img1, img2], 160)
     if imgs is not None:
         feed_dict = {images_placeholder:imgs,  phase_train_placeholder:False}
         start = time.time()
@@ -110,11 +115,10 @@ while True:
         print(dist)
         res = {}
         if dist < verification_threshold :
-            res['acc'] = True
+            res = 'acc'
         else:
-            res['acc'] = False
-        reply_msg = json.dumps(res)
-        socket.send(reply_msg)
+            res = 'rej'
+        socket.send(res)
 
 '''
 if __name__=='__main__':
